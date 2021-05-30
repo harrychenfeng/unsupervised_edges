@@ -1,0 +1,1 @@
+./output/images/abd1587_s3_0000000036.png ./output/images/abd1587_s3_0000000040.png
