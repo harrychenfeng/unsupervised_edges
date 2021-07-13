@@ -270,7 +270,7 @@ def copy_vid_folder(vid_folder, output_folder, ext=None):
 
     # sanity check
     if len(frame_list) == 0:
-        print "Can not open video folder: {:s}".format(vid_folder)
+        print("Can not open video folder: {:s}".format(vid_folder))
         return frame_pairs
     
     start = time.time()
@@ -295,8 +295,8 @@ def copy_vid_folder(vid_folder, output_folder, ext=None):
 
     # timing
     end = time.time()
-    print "Averge time per frame: {:2f} s. (Total {:d} frames)".format(
-        float(end-start)/len(frame_pairs), len(frame_pairs))
+    print("Averge time per frame: {:2f} s. (Total {:d} frames)".format(
+        float(end-start)/len(frame_pairs), len(frame_pairs)))
 
     return frame_pairs
 
@@ -334,12 +334,12 @@ def process_vid_folder(vid_folder, output_folder, max_num_samples,
 
     # sanity check
     if len(frame_list) == 0:
-        print "Can not open video folder: {:s}".format(vid_folder)
+        print("Can not open video folder: {:s}".format(vid_folder))
         return frame_pairs
     
     # fetch the first batch of pairs into buffer
     frame_buffer = []
-    for ind in xrange(max_frame_range):
+    for ind in range(max_frame_range):
         frame = cv2.imread(frame_list[ind])
         frame_buffer.append(frame.copy())
 
@@ -393,12 +393,12 @@ def process_vid_folder(vid_folder, output_folder, max_num_samples,
 
     # timing
     end = time.time()
-    print "Averge time per frame: {:2f} s. Sampled {:d} out of {:d} frames".format(
-        float(end-start)/frame_index, len(frame_pairs), frame_index)
+    print("Averge time per frame: {:2f} s. Sampled {:d} out of {:d} frames".format(
+        float(end-start)/frame_index, len(frame_pairs), frame_index))
 
     # resample the frame pairs if too many
     if len(frame_pairs) > max_num_samples:
-        print "Resample into {:d} frame pairs".format(max_num_samples)
+        print("Resample into {:d} frame pairs".format(max_num_samples))
         # resample frame pair index
         rand_ind = np.random.permutation(range(len(frame_pairs)))
         sel_pair_ind = rand_ind[:max_num_samples]
@@ -459,12 +459,12 @@ def process_vid_file(vid_file, output_folder, max_num_samples,
     # open video file
     cap = cv2.VideoCapture(vid_file)
     if not cap.isOpened():
-        print "Can not open video file: {:s}".format(vid_file)
+        print("Can not open video file: {:s}".format(vid_file))
         return frame_pairs
     
     # fetch the first batch of pairs into buffer
     frame_buffer = []
-    for ind in xrange(max_frame_range):
+    for ind in range(max_frame_range):
         ret, frame = cap.read()
         if ret and (frame is not None):
             frame_buffer.append(frame.copy())
@@ -518,12 +518,12 @@ def process_vid_file(vid_file, output_folder, max_num_samples,
 
     # timing
     end = time.time()
-    print "Averge time per frame: {:2f} s. Sampled {:d} out of {:d} frames".format(
-        float(end-start)/frame_index, len(frame_pairs), frame_index)
+    print("Averge time per frame: {:2f} s. Sampled {:d} out of {:d} frames".format(
+        float(end-start)/frame_index, len(frame_pairs), frame_index))
 
     # resample the frame pairs if too many
     if len(frame_pairs) > max_num_samples:
-        print "Resample into {:d} frame pairs".format(max_num_samples)
+        print("Resample into {:d} frame pairs".format(max_num_samples))
         # resample frame pair index
         # quick hack: remove first 10% and last 10% frames for video
         rand_ind = np.random.permutation(range(
@@ -582,16 +582,16 @@ if __name__ == '__main__':
         # video file?
         if ('.avi' in os.path.basename(video)) or ('.mp4' in os.path.basename(video)) \
             and os.path.exists(video):
-            print "Processing video file: {:s}".format(video)
+            print("Processing video file: {:s}".format(video))
             curr_pairs = process_vid_file(video, output_folder, frames_per_video)
         # video folder?
         elif os.path.isdir(video):
             if copy_frames:
                 # simply copy all frames (used only for prepare sintel dataset)
-                print "Coping video folder: {:s}".format(video)
+                print("Coping video folder: {:s}".format(video))
                 curr_pairs = copy_vid_folder(video, output_folder)
             else:
-                print "Processing video folder: {:s}".format(video)
+                print("Processing video folder: {:s}".format(video))
                 curr_pairs = process_vid_folder(video, output_folder, frames_per_video)
 
         all_pairs = all_pairs + curr_pairs
