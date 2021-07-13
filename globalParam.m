@@ -5,9 +5,9 @@ function param = globalParam(dataset)
 addpath('./flow_utils');
 addpath('./structured_edges');
 % put piotr's toolbox path here
-addpath(genpath('./toolbox-master'));
+addpath(genpath('./toolbox'));
 % put root data folder here
-rootPath = '/home/yin/edge_flow_data';
+rootPath = '/home/parallels/Desktop/unsupervised_edges/edge_flow_data';
 
 %% set up datasets
 % we will mainly use three datasets:
@@ -15,12 +15,12 @@ rootPath = '/home/yin/edge_flow_data';
 % Sintel for benchmark optical flow
 % Video for learning
 % each dataset is defined by a set of frame pairs
-allDatasets = {'bsds', 'sintel', 'video'};
+allDatasets = {'bsds', 'sintel', 'vsb', 'nba', 'manuf'};
 % if we will sample the frames (or simply keep them all)
-allSampleFrames = [0 0 1];
-allScales = [1 1 0.5];
-allFlowFlags = {'-sintel', '-sintel', '-sintel'};
-allFileExt = {'.jpg', '.png', '.png'};
+allSampleFrames = [0 0 1 0 1];
+allScales = [1 1 0.5 1 0.5];
+allFlowFlags = {'-sintel', '-sintel', '-sintel', '-sintel', '-sintel'};
+allFileExt = {'.jpg', '.png', '.png', '.png', '.png'};
 
 % set up dataset params
 index = strcmp(dataset, allDatasets);
@@ -60,5 +60,5 @@ param.dmBin = './bins/deepmatching';
 param.efBin = './bins/epicflow';
 
 %% for parfor
-param.numProc = 6;
+param.numProc = 2;
 

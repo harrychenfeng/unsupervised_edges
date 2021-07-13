@@ -5,8 +5,9 @@ clc;
 %% this is the top level script for our pipeline
 % set up the param struct for all datasets
 sintelParam = globalParam('sintel');
-videoParam = globalParam('video');
-bsdsParam = globalParam('bsds');
+videoParam = globalParam('vsb');
+% bsdsParam = globalParam('bsds');
+manufParam = globalParam('manuf');
 
 % setup iteration numbers
 prevFolder = []; currFolder = [];
@@ -18,12 +19,12 @@ ratio = 1.1;
 fid = fopen('new_result.txt', 'w');
 
 % create tmp folder if it does not exist
-if ~isdir(videoParam.tmpFolder)
-  mkdir(videoParam.tmpFolder)
+if ~isdir(manufParam.tmpFolder)
+  mkdir(manufParam.tmpFolder)
 end
 
 % re-allocate matlab parpool if any
-delete(gcp); pObj = parpool(videoParam.numProc);
+delete(gcp); pObj = parpool(manufParam.numProc);
 
 %% For each iteration (except the first one), we follow 5 steps
 % (1) get motion edges from previous flow
@@ -42,14 +43,14 @@ for iter = startIter:numIter
     % for the first iteration, we need to
     % 1) get init flow results with soble (also randomly sample pairs)
     % 2) get motion boundary using sobel
-    initFlows(videoParam, prevFolder);
-    initMotEdges(videoParam, prevFolder, currFolder);
+    initFlows(manufParam, prevFolder);
+    initMotEdges(manufParam, prevFolder, currFolder);
     threshBracket = [0.4 0.8];
   else
-    oldModel = load(fullfile(videoParam.tmpFolder, 'forest', ...
-      [videoParam.dataset '_' prevFolder '.mat']));
+    oldModel = load(fullfile(manufParam.tmpFolder, 'forest', ...
+      [manufParam.dataset '_' prevFolder '.mat']));
     oldModel = oldModel.model;
-    detAllMotEdges(videoParam, prevFolder, currFolder, oldModel);
+    detAllMotEdges(manufParam, prevFolder, currFolder, oldModel);
     oldModel = [];
     threshBracket = [0.05 0.4]*ratio;
     % gradually increase the threshold over iterations
@@ -61,23 +62,23 @@ for iter = startIter:numIter
     % re-allocate matlab parpool (saving us memory)
     delete(gcp); pObj = parpool(2);
     % increase the number of training samples for the last iter (boosting performance a bit)
-    model = edgesTrain( videoParam.imgPath, fullfile(videoParam.motEdgePath, currFolder), ...
-      'modelFnm', [videoParam.dataset '_' currFolder], 'scale', videoParam.scale, ...
-      'modelDir', videoParam.tmpFolder, 'threshBracket', threshBracket, 'nPos', 2e6, 'nNeg', 2e6);
+    model = edgesTrain( manufParam.imgPath, fullfile(manufParam.motEdgePath, currFolder), ...
+      'modelFnm', [manufParam.dataset '_' currFolder], 'scale', manufParam.scale, ...
+      'modelDir', manufParam.tmpFolder, 'threshBracket', threshBracket, 'nPos', 2e6, 'nNeg', 2e6);
     % recover the matlab pool
-    delete(gcp); pObj = parpool(videoParam.numProc);
-  else 
-    model = edgesTrain( videoParam.imgPath, fullfile(videoParam.motEdgePath, currFolder), ...
-      'modelFnm', [videoParam.dataset '_' currFolder], 'scale', videoParam.scale, ...
-      'modelDir', videoParam.tmpFolder, 'threshBracket', threshBracket);
+    delete(gcp); pObj = parpool(manufParam.numProc);
+  else
+    model = edgesTrain( manufParam.imgPath, fullfile(manufParam.motEdgePath, currFolder), ...
+      'modelFnm', [manufParam.dataset '_' currFolder], 'scale', manufParam.scale, ...
+      'modelDir', manufParam.tmpFolder, 'threshBracket', threshBracket);
   end
 
   %% (3) run the edge detector using the trained model
-  detAllEdges(model, videoParam, currFolder);
+  detAllEdges(model, manufParam, currFolder);
   
   %% (4) re-estimate the flow using detected edges
   % (also randomly sample pairs)
-  calcAllFlows(videoParam, currFolder);
+  calcAllFlows(manufParam, currFolder);
   
   %% (5) benchmark for edge/flow (kind of slow)
   % benchmark edge detection results on bsds
