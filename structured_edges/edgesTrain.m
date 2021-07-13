@@ -1,13 +1,15 @@
-function model = edgesTrain( varargin )
+function model = edgesTrain( trnImgDir, trnGtDir, varargin )
 % Train structured edge detector.
 %
 % For an introductory tutorial please see edgesDemo.m.
 %
 % USAGE
 %  opts = edgesTrain()
-%  model = edgesTrain( opts )
+%  model = edgesTrain( trnImgDir, trnGtDir, opts )
 %
 % INPUTS
+%  trnImgDir  - folder with all training images
+%  trnGtDir   - folder with all edge maps
 %  opts       - parameters (struct or name/value pairs)
 %   (1) model parameters:
 %   .imWidth    - [32] width of image patches
@@ -47,6 +49,7 @@ function model = edgesTrain( varargin )
 %   .modelDir   - ['models/'] target directory for storing models
 %   .modelFnm   - ['model'] model filename
 %   .bsdsDir    - ['BSR/BSDS500/data/'] location of BSDS dataset
+%   .scale      = [1] scale factor for gt and images
 %
 % OUTPUTS
 %  model      - trained structured edge detector w the following fields
@@ -64,22 +67,25 @@ function model = edgesTrain( varargin )
 % See also edgesDemo, edgesChns, edgesDetect, forestTrain
 %
 % Structured Edge Detection Toolbox      Version 3.01
-% Code written by Piotr Dollar, 2014.
+% Code written by Piotr Dollar, 2014. Modified by Yin
 % Licensed under the MSR-LA Full Rights License [see license.txt]
 
 % get default parameters
-dfs={'imWidth',32, 'gtWidth',16, 'nPos',5e5, 'nNeg',5e5, 'nImgs',inf, ...
+% I have hard coded some param here
+dfs={'imWidth',32, 'gtWidth',16, 'nPos', 5e5, 'nNeg', 5e5, 'nImgs',inf, ...
   'nTrees',8, 'fracFtrs',1/4, 'minCount',1, 'minChild',8, ...
-  'maxDepth',64, 'discretize','pca', 'nSamples',256, 'nClasses',2, ...
+  'maxDepth',64, 'discretize','kmeans', 'nSamples',256, 'nClasses',2, ...
   'split','gini', 'nOrients',4, 'grdSmooth',0, 'chnSmooth',2, ...
   'simSmooth',8, 'normRad',4, 'shrink',2, 'nCells',5, 'rgbd',0, ...
-  'stride',2, 'multiscale',0, 'sharpen',2, 'nTreesEval',4, ...
-  'nThreads',4, 'nms',0, 'seed',1, 'useParfor',0, 'modelDir','models/', ...
-  'modelFnm','model', 'bsdsDir','BSR/BSDS500/data/'};
+  'stride',2, 'multiscale',1, 'sharpen',2, 'nTreesEval',4, ...
+  'nThreads', 4, 'nms',0, 'seed',1, 'useParfor', 1, 'modelDir','./tmp/', ...
+  'modelFnm','model', 'scale', 1, 'nGt', 4, 'threshBracket', [0.1 0.4]};
 opts = getPrmDflt(varargin,dfs,1);
 if(nargin==0), model=opts; return; end
 
 % if forest exists load it and return
+% modelDir -> param.tmpFolder
+% modelFnm -> param.dataset + param.iter
 cd(fileparts(mfilename('fullpath')));
 forestDir = [opts.modelDir '/forest/'];
 forestFn = [forestDir opts.modelFnm];
@@ -95,19 +101,25 @@ imWidth=opts.imWidth; gtWidth=opts.gtWidth;
 imWidth=round(max(gtWidth,imWidth)/shrink/2)*shrink*2;
 opts.imWidth=imWidth; opts.gtWidth=gtWidth;
 nChnsGrad=(opts.nOrients+1)*2; nChnsColor=3;
-if(opts.rgbd==1), nChnsColor=1; end
-if(opts.rgbd==2), nChnsGrad=nChnsGrad*2; nChnsColor=nChnsColor+1; end
 nChns = nChnsGrad+nChnsColor; opts.nChns = nChns;
 opts.nChnFtrs = imWidth*imWidth*nChns/shrink/shrink;
 opts.nSimFtrs = (nCells*nCells)*(nCells*nCells-1)/2*nChns;
+% opts.nTotFtrs = (opts.nChnFtrs + opts.nSimFtrs)/2; disp(opts);
 opts.nTotFtrs = opts.nChnFtrs + opts.nSimFtrs; disp(opts);
 
 % generate stream for reproducibility of model
 stream=RandStream('mrg32k3a','Seed',opts.seed);
 
 % train nTrees random trees (can be trained with parfor if enough memory)
-if(opts.useParfor), parfor i=1:nTrees, trainTree(opts,stream,i); end
-else for i=1:nTrees, trainTree(opts,stream,i); end; end
+if(opts.useParfor),
+  parfor i=1:nTrees,
+    trainTree(trnImgDir, trnGtDir, opts,stream,i);
+  end
+else
+  for i=1:nTrees,
+    trainTree(trnImgDir, trnGtDir, opts,stream,i);
+  end
+end
 
 % merge trees and save model
 model = mergeTrees( opts );
@@ -116,6 +128,7 @@ save([forestFn '.mat'], 'model', '-v7.3');
 
 end
 
+%% merging all trees into forest
 function model = mergeTrees( opts )
 % accumulate trees and merge into final model
 nTrees=opts.nTrees; gtWidth=opts.gtWidth;
@@ -154,28 +167,39 @@ eBnds=zeros(nNodes*nTrees,nBnds);
 parfor i=1:nTrees*nNodes
   if(model.child(i) || model.nSegs(i)==1), continue; end %#ok<PFBNS>
   E=gradientMag(single(model.segs(:,:,i)))>.01; E0=0;
+  % eBins stores the sparse edge coordinates for all segments
+  % eBnds stores the number of edge pixels for all segments
   for j=1:nBnds, eBins{i,j}=uint16(find(E & ~E0)'-1); E0=E;
     eBnds(i,j)=length(eBins{i,j}); E=convTri(single(E),1)>.01; end
 end
 eBins=eBins'; model.eBins=[eBins{:}]';
+% eBnds now stores the index of each sparse edge structure
 eBnds=eBnds'; model.eBnds=uint32([0; cumsum(eBnds(:))]);
 end
 
-function trainTree( opts, stream, treeInd )
+%% the main function for training
+function trainTree( trnImgDir, trnGtDir, opts, stream, treeInd )
 % Train a single tree in forest model.
 
 % location of ground truth
-trnImgDir = [opts.bsdsDir '/images/train/'];
-trnDepDir = [opts.bsdsDir '/depth/train/'];
-trnGtDir = [opts.bsdsDir '/groundTruth/train/'];
-imgIds=dir(trnImgDir); imgIds=imgIds([imgIds.bytes]>0);
-imgIds={imgIds.name}; ext=imgIds{1}(end-2:end);
-nImgs=length(imgIds); for i=1:nImgs, imgIds{i}=imgIds{i}(1:end-4); end
+% note we will only train on the images with GT results
+imgIds=dir(fullfile(trnGtDir, '*.png'));
+fileExt = '.png';
+if isempty(imgIds);
+  imgIds = dir(fullfile(trnGtDir, '*.jpg'));
+  fileExt = '.jpg';
+end
+imgIds=imgIds([imgIds.bytes]>0);
+imgIds={imgIds.name};
+nImgs=length(imgIds);
+for i=1:nImgs,
+  imgIds{i}=imgIds{i}(1:end-4);
+end
 
 % extract commonly used options
 imWidth=opts.imWidth; imRadius=imWidth/2;
 gtWidth=opts.gtWidth; gtRadius=gtWidth/2;
-nChns=opts.nChns; nTotFtrs=opts.nTotFtrs; rgbd=opts.rgbd;
+nChns=opts.nChns; nTotFtrs=opts.nTotFtrs;
 nPos=opts.nPos; nNeg=opts.nNeg; shrink=opts.shrink;
 
 % finalize setup
@@ -197,43 +221,110 @@ k = nPos+nNeg; nImgs=min(nImgs,opts.nImgs);
 ftrs = zeros(k,length(fids),'single');
 labels = zeros(gtWidth,gtWidth,k,'uint8'); k = 0;
 tid = ticStatus('Collecting data',30,1);
+
+% modified by YL
 for i = 1:nImgs
   % get image and compute channels
-  gt=load([trnGtDir imgIds{i} '.mat']); gt=gt.groundTruth;
-  I=imread([trnImgDir imgIds{i} '.' ext]); siz=size(I);
-  if(rgbd), D=single(imread([trnDepDir imgIds{i} '.png']))/1e4; end
-  if(rgbd==1), I=D; elseif(rgbd==2), I=cat(3,single(I)/255,D); end
+  me=imread(fullfile(trnGtDir, [imgIds{i} fileExt]));
+  me = im2double(me);
+  I=imread(fullfile(trnImgDir, [imgIds{i} fileExt]));
+  nGt = opts.nGt;
+  
+  % resize the image and groundtruth if necessary
+  if opts.scale < 1
+    %me = imresize(me, opts.scale);
+    I = imresize(I, opts.scale);
+    assert(size(I,1)==size(me,1) && size(I,2)==size(me,2))
+  end
+  
+  % get image features
+  siz=size(I);
   p=zeros(1,4); p([2 4])=mod(4-mod(siz(1:2),4),4);
   if(any(p)), I=imPad(I,p,'symmetric'); end
   [chnsReg,chnsSim] = edgesChns(I,opts);
+  
   % sample positive and negative locations
-  nGt=length(gt); xy=[]; k1=0; B=false(siz(1),siz(2));
+  xy=[]; k1=0; B=false(siz(1),siz(2));
   B(shrink:shrink:end,shrink:shrink:end)=1;
   B([1:imRadius end-imRadius:end],:)=0;
   B(:,[1:imRadius end-imRadius:end])=0;
+  
+  % generate the threshlist
+  thresh = exp(linspace(log(opts.threshBracket(1)), log(opts.threshBracket(2)), nGt));
+  gt = cell([1 nGt]);
+  
+  % all we care about is the pretty positive samples!
+  Mneg=~(bwdist(me>0.1)<gtRadius);
+  posLabels = [];
   for j=1:nGt
-    M=gt{j}.Boundaries; M(bwdist(M)<gtRadius)=1;
-    [y,x]=find(M.*B); k2=min(length(y),ceil(nPos/nImgs/nGt));
+    
+    % threshold the motion boundary to get the a boundary map
+    Mpos=(me>thresh(j)); gt{j} = Mpos;
+    % get the pos sample (if there is a boundary pixel within the patch)
+    Mpos(bwdist(Mpos)<gtRadius)=1;
+    [y,x]=find(Mpos.*B); k2=min(length(y),ceil(2*nPos/nImgs/nGt));
     rp=randperm(length(y),k2); y=y(rp); x=x(rp);
     xy=[xy; x y ones(k2,1)*j]; k1=k1+k2; %#ok<AGROW>
-    [y,x]=find(~M.*B); k2=min(length(y),ceil(nNeg/nImgs/nGt));
+    posLabels = [posLabels; ones(k2, 1)];
+    
+    % lower thrshold for neg samples
+    [y,x]=find(Mneg.*B); k2=min(length(y),ceil(nNeg/nImgs/nGt));
     rp=randperm(length(y),k2); y=y(rp); x=x(rp);
     xy=[xy; x y ones(k2,1)*j]; k1=k1+k2; %#ok<AGROW>
+    posLabels = [posLabels; zeros(k2, 1)];
+    
   end
+  
+  % k1 is the maximum number of samples, but we do not know the exact
+  % number until we sample them
+  k1 = ceil((nPos + nNeg)/nImgs); kSamples = length(posLabels);
+  
   if(k1>size(ftrs,1)-k), k1=size(ftrs,1)-k; xy=xy(1:k1,:); end
   % crop patches and ground truth labels
   psReg=zeros(imWidth/shrink,imWidth/shrink,nChns,k1,'single');
   lbls=zeros(gtWidth,gtWidth,k1,'uint8');
   psSim=psReg; ri=imRadius/shrink; rg=gtRadius;
-  for j=1:k1, xy1=xy(j,:); xy2=xy1/shrink;
-    psReg(:,:,:,j)=chnsReg(xy2(2)-ri+1:xy2(2)+ri,xy2(1)-ri+1:xy2(1)+ri,:);
-    psSim(:,:,:,j)=chnsSim(xy2(2)-ri+1:xy2(2)+ri,xy2(1)-ri+1:xy2(1)+ri,:);
-    t=gt{xy1(3)}.Segmentation(xy1(2)-rg+1:xy1(2)+rg,xy1(1)-rg+1:xy1(1)+rg);
-    if(all(t(:)==t(1))), lbls(:,:,j)=1; else [~,~,t]=unique(t);
-      lbls(:,:,j)=reshape(t,gtWidth,gtWidth); end
+  
+  % check each local patch
+  curSampleIdx = 0;
+  for j=1:kSamples,
+    if curSampleIdx < k1
+      % get the sample coordinate
+      xy1=xy(j,:); xy2=xy1/shrink;
+      
+      % crop boundary patch -> find super pixel using boundary map
+      % -> remove boundary pixels
+      e = gt{xy1(3)}(xy1(2)-rg+1:xy1(2)+rg,xy1(1)-rg+1:xy1(1)+rg);
+      s = bwlabel(~e, 4);
+      t = spDetectMex('boundaries',uint32(s),single(e),0,1); t = t+ 1;
+      if(all(t(:)==t(1)) && posLabels(j)==1),
+        continue; % this is not a good edge sample, so skip it
+      elseif all(t(:)==t(1))
+        curSampleIdx = curSampleIdx + 1;
+        lbls(:,:,curSampleIdx)=1; % negtive sample
+      else
+        curSampleIdx = curSampleIdx + 1;
+        [~,~,t]=unique(t);
+        lbls(:,:,curSampleIdx)=reshape(t,gtWidth,gtWidth); % positive sample
+      end
+     
+      % crop the feature
+      psReg(:,:,:,curSampleIdx)=chnsReg(xy2(2)-ri+1:xy2(2)+ri,xy2(1)-ri+1:xy2(1)+ri,:);
+      psSim(:,:,:,curSampleIdx)=chnsSim(xy2(2)-ri+1:xy2(2)+ri,xy2(1)-ri+1:xy2(1)+ri,:);
+    end
+    
   end
-  if(0), figure(1); montage2(squeeze(psReg(:,:,1,:))); drawnow; end
-  if(0), figure(2); montage2(lbls(:,:,:)); drawnow; end
+  
+  % the actual number of samples
+  k1 = curSampleIdx; psReg = psReg(:,:,:,1:k1); psSim = psSim(:,:,:,1:k1);
+  lbls = lbls(:,:,1:k1);
+  
+  % visualization code
+%   if(1), figure(1); montage2(squeeze(psReg(:,:,1,:))); drawnow; end
+%   if(1), figure(2); montage2(lbls(:,:,:)); drawnow; end
+%   if(1), figure(3); imshow(me); drawnow; end
+%   pause
+  
   % compute features and store
   ftrs1=[reshape(psReg,[],k1)' stComputeSimFtrs(psSim,opts)];
   ftrs(k+1:k+k1,:)=ftrs1(:,fids); labels(:,:,k+1:k+k1)=lbls;
@@ -256,6 +347,7 @@ RandStream.setGlobalStream( streamOrig );
 
 end
 
+%% sim features
 function ftrs = stComputeSimFtrs( chns, opts )
 % Compute self-similarity features (order must be compatible w mex file).
 w=opts.imWidth/opts.shrink; n=opts.nCells; if(n==0), ftrs=[]; return; end
@@ -268,6 +360,7 @@ k=0; for i=1:n*n-1, k1=n*n-i; i1=ones(1,k1)*i;
 ftrs = reshape(ftrs,nSimFtrs,m)';
 end
 
+%% discretize the edge patches
 function [hs,segs] = discretize( segs, nClasses, nSamples, type )
 % Convert a set of segmentations into a set of labels in [1,nClasses].
 persistent cache; w=size(segs{1},1); assert(size(segs{1},2)==w);
